@@ -52,6 +52,8 @@ EXTRA_HEADERS = \
   include/GL/*.h \
   include/psdk_inc/*.h \
   include/gdiplus/*.h \
+  include/winrt/*.h \
+  include/winrt/impl/*.h \
   include/wrl/*.h \
   include/wrl/wrappers/*.h \
   crt/*.h \
