@@ -696,3 +696,34 @@ jobs:
           ../configure --disable-dependency-tracking --prefix=/gcc-mingw/${{matrix.arch}}-w64-mingw32 --host=${{matrix.arch}}-w64-mingw32 --enable-silent-rules CPPFLAGS="-Werror"
           make -j$(nproc)
           make -j$(nproc) check -k -O || { cat tests/test-suite.log; exit 1; }
+
+  check-sdk-headers:
+    runs-on: windows-latest
+    env:
+      SDKVER: "10.0.26100.0"
+      ARCH: "x64"
+      MSYSTEM: "MSYS"
+      CHERE_INVOKING: "1"
+    defaults:
+      run:
+        shell: cmd
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            diffutils
+      - name: Check C++/WinRT headers against Windows SDK
+        # https://github.com/microsoft/vswhere/wiki/Find-VC
+        # https://learn.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170#vcvarsall-syntax
+        run: |
+          set VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere
+          for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (set InstallDir=%%i)
+          echo InstallDir: %InstallDir%
+          set VCVARSALL=%InstallDir%\VC\Auxiliary\Build\vcvarsall.bat
+          echo VCVARSALL: %VCVARSALL%
+          call "%VCVARSALL%" %ARCH% %SDKVER%
+          msys2 -c .github/workflows/check-cpp-winrt-headers.sh
