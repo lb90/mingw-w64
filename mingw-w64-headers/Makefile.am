@@ -331,5 +331,20 @@ include/wincrypt.h: ;
 
 endif
 
+if HAVE_CPPWINRT
+
+CPPWINRT_SRCS = \
+  winrt/idl/*.idl
+
+# TODO: Should this be += ?
+BUILT_SOURCES += $(CPPWINRT_SRCS:.idl=.h)
+
+# Can we override the rule for widl!?
+# TODO
+%.tlb: %.idl
+	$(CPPWINRT) -I$(srcdir)/include -L$(srcdir)/tlb -t -o $@ $<
+
+endif
+
 _mingw_ddk.h: $(srcdir)/crt/sdks/_mingw_ddk.h.in
 	$(SED) s/MINGW_HAS_DDK$$/@MINGW_HAS_DDK@/ $< > $@

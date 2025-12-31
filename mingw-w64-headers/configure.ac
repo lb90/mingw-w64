@@ -35,6 +35,24 @@ AS_VAR_IF([with_widl],[no],[],[
 
 AM_CONDITIONAL([HAVE_WIDL],[AS_VAR_TEST_SET([WIDL])])
 
+AC_MSG_CHECKING([whether to rebuild C++/WinRT headers with cppwinrt])
+AC_ARG_WITH([cppwinrt],
+  AS_HELP_STRING([--with-cppwinrt=PATH],
+    [use cppwinrt to update C++/WinRT headers.  Optionally search for a compatible cppwinrt in PATH]),
+  [AS_VAR_IF([with_cppwinrt],[yes],[AS_VAR_SET([with_cppwinrt],["$PATH"])])],
+  [AS_VAR_SET([with_cppwinrt],[no])])
+AC_MSG_RESULT([$with_cppwinrt])
+
+# TODO: Also check $host-cppwinrt as for widl (line 33)?
+
+AS_VAR_IF([with_cppwinrt],[no],[],[
+  AS_VAR_IF([srcdir],[.],[],
+    [AC_MSG_WARN([--with-cppwinrt used in out of the tree compilation.  Existing generated files will not be modified.])])
+  AC_PATH_PROGS([CPPWINRT], [cppwinrt], [], [$with_cppwinrt])
+  AS_VAR_IF([CPPWINRT],[],[AC_MSG_ERROR([--with-cppwinrt is specified, but cppwinrt installation could not be found.])])])
+
+AM_CONDITIONAL([HAVE_CPPWINRT],[AS_VAR_TEST_SET([CPPWINRT])])
+
 # Checks for libraries.
 
 # Checks for header files.
