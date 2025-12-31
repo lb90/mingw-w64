@@ -163,7 +163,6 @@ IDL_SRCS = \
   include/inputpaneinterop.idl \
   include/inputscope.idl \
   include/inspectable.idl \
-  include/ivectorchangedeventargs.idl \
   include/iwscapi.idl \
   include/locationapi.idl \
   include/oaidl.idl \
@@ -288,94 +287,9 @@ IDL_SRCS = \
   include/wsdxml.idl \
   include/wsmandisp.idl \
   include/wtypesbase.idl \
-  include/windows.applicationmodel.activation.idl \
-  include/windows.applicationmodel.background.idl \
-  include/windows.applicationmodel.core.idl \
-  include/windows.applicationmodel.datatransfer.dragdrop.core.idl \
-  include/windows.applicationmodel.datatransfer.dragdrop.idl \
-  include/windows.applicationmodel.datatransfer.idl \
-  include/windows.applicationmodel.idl \
-  include/windows.data.json.idl \
-  include/windows.data.xml.dom.idl \
-  include/windows.devices.bluetooth.advertisement.idl \
-  include/windows.devices.bluetooth.genericattributeprofile.idl \
-  include/windows.devices.bluetooth.idl \
-  include/windows.devices.bluetooth.rfcomm.idl \
-  include/windows.devices.enumeration.idl \
-  include/windows.devices.geolocation.idl \
-  include/windows.devices.haptics.idl \
-  include/windows.devices.input.idl \
-  include/windows.devices.power.idl \
-  include/windows.devices.radios.idl \
-  include/windows.devices.usb.idl \
-  include/windows.foundation.idl \
   include/windows.foundation.collections.idl \
-  include/windows.foundation.metadata.idl \
-  include/windows.foundation.numerics.idl \
-  include/windows.gaming.input.idl \
-  include/windows.gaming.input.custom.idl \
-  include/windows.gaming.input.forcefeedback.idl \
-  include/windows.gaming.ui.idl \
-  include/windows.globalization.idl \
-  include/windows.graphics.capture.idl \
   include/windows.graphics.capture.interop.idl \
-  include/windows.graphics.directx.idl \
-  include/windows.graphics.directx.direct3d11.idl \
-  include/windows.graphics.effects.idl \
-  include/windows.graphics.holographic.idl \
-  include/windows.graphics.idl \
-  include/windows.graphics.imaging.idl \
-  include/windows.management.deployment.idl \
-  include/windows.media.capture.idl \
-  include/windows.media.closedcaptioning.idl \
-  include/windows.media.core.idl \
-  include/windows.media.devices.idl \
-  include/windows.media.effects.idl \
-  include/windows.media.faceanalysis.idl \
-  include/windows.media.idl \
-  include/windows.media.mediaproperties.idl \
-  include/windows.media.playback.idl \
-  include/windows.media.render.idl \
-  include/windows.media.speechrecognition.idl \
-  include/windows.media.speechsynthesis.idl \
-  include/windows.media.transcoding.idl \
-  include/windows.networking.connectivity.idl \
-  include/windows.networking.idl \
-  include/windows.networking.sockets.idl \
-  include/windows.perception.idl \
-  include/windows.perception.spatial.idl \
-  include/windows.perception.spatial.surfaces.idl \
-  include/windows.security.authentication.onlineid.idl \
-  include/windows.security.authorization.appcapabilityaccess.idl \
-  include/windows.security.credentials.idl \
-  include/windows.security.credentials.ui.idl \
-  include/windows.security.cryptography.core.idl \
-  include/windows.security.cryptography.idl \
-  include/windows.security.enterprisedata.idl \
-  include/windows.security.exchangeactivesyncprovisioning.idl \
-  include/windows.security.isolation.idl \
-  include/windows.storage.idl \
-  include/windows.storage.fileproperties.idl \
-  include/windows.storage.search.idl \
-  include/windows.storage.streams.idl \
-  include/windows.system.idl \
-  include/windows.system.power.idl \
-  include/windows.system.profile.idl \
-  include/windows.system.profile.systemmanufacturers.idl \
-  include/windows.system.threading.idl \
-  include/windows.system.userprofile.idl \
-  include/windows.ui.idl \
-  include/windows.ui.input.idl \
-  include/windows.ui.composition.idl \
-  include/windows.ui.composition.interop.idl \
-  include/windows.ui.core.idl \
-  include/windows.ui.notifications.idl \
-  include/windows.ui.viewmanagement.core.idl \
-  include/windows.ui.viewmanagement.idl \
-  include/windows.ui.windowmanagement.idl \
   include/windows.ui.xaml.hosting.desktopwindowxamlsource.idl \
-  include/windows.ui.xaml.idl \
-  include/windows.ui.xaml.interop.idl \
   include/windowscontracts.idl \
   include/wmcodecdsp.idl \
   include/wmdrmsdk.idl \
