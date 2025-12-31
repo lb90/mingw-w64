@@ -307,6 +307,9 @@ IDL_SRCS = \
   include/xpsobjectmodel.idl \
   include/xpsprint.idl
 
+IDL_SRCS += \
+  winrt/idl/*.idl
+
 TLB_SRCS = \
   tlb/oleacc.dll.idl \
   tlb/stdole2.idl
