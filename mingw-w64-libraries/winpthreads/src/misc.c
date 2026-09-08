@@ -32,10 +32,15 @@
 /* internal header files */
 #include "misc.h"
 
+#include <assert.h>
+
 void (WINAPI *_pthread_get_system_time_best_as_file_time) (LPFILETIME) = NULL;
 static ULONGLONG (WINAPI *_pthread_get_tick_count_64) (VOID);
 HRESULT (WINAPI *_pthread_set_thread_description) (HANDLE, PCWSTR) = NULL;
 BOOL (WINAPI *_pthread_get_handle_information) (HANDLE, LPDWORD) = NULL;
+
+pWaitOnAddress_t _pthread_wait_on_address;
+pWakeByAddressAll_t _pthread_wake_by_address_all;
 
 #if defined(__GNUC__) || defined(__clang__)
 #if __GNUC__ >= 9 && !defined(__clang__)
@@ -46,40 +51,52 @@ __attribute__((constructor(0)))
 #endif
 static void winpthreads_init(void)
 {
-    HMODULE mod = GetModuleHandleA("kernel32.dll");
-    if (mod)
-    {
-        _pthread_get_handle_information =
-            (BOOL (WINAPI *)(HANDLE, LPDWORD))(void*) GetProcAddress(mod, "GetHandleInformation");
+    HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
+    HMODULE kernelbase = GetModuleHandleA("kernelbase.dll");
 
-        _pthread_get_tick_count_64 =
-            (ULONGLONG (WINAPI *)(VOID))(void*) GetProcAddress(mod, "GetTickCount64");
+    assert (kernel32);
 
-        _pthread_set_thread_description =
-            (HRESULT (WINAPI *)(HANDLE, PCWSTR))(void*) GetProcAddress(mod, "SetThreadDescription");
+    _pthread_get_handle_information =
+        (BOOL (WINAPI *)(HANDLE, LPDWORD))(void*) GetProcAddress(kernel32, "GetHandleInformation");
 
-        /* <1us precision on Windows 10 */
-        _pthread_get_system_time_best_as_file_time =
-            (void (WINAPI *)(LPFILETIME))(void*) GetProcAddress(mod, "GetSystemTimePreciseAsFileTime");
-    }
+    _pthread_get_tick_count_64 =
+        (ULONGLONG (WINAPI *)(VOID))(void*) GetProcAddress(kernel32, "GetTickCount64");
 
-    if (!_pthread_get_system_time_best_as_file_time)
+    _pthread_set_thread_description =
+        (HRESULT (WINAPI *)(HANDLE, PCWSTR))(void*) GetProcAddress(kernel32, "SetThreadDescription");
+
+    /* <1us precision on Windows 10 */
+    _pthread_get_system_time_best_as_file_time =
+        (void (WINAPI *)(LPFILETIME))(void*) GetProcAddress(kernel32, "GetSystemTimePreciseAsFileTime");
+
+    if (!_pthread_get_system_time_best_as_file_time) {
         /* >15ms precision on Windows 10 */
         _pthread_get_system_time_best_as_file_time = GetSystemTimeAsFileTime;
+    }
 
-    /* Although SetThreadDescription lives in kernel32.dll, on Windows Server 2016,
-     * Windows 10 LTSB 2016 and Windows 10 version 1607, it was only available in
-     * kernelbase.dll. So, load it from there for maximum coverage.
-     */
-    if (!_pthread_set_thread_description)
-    {
-        mod = GetModuleHandleA("kernelbase.dll");
-        if (mod)
-        {
+    if (kernelbase) {
+        /* Although SetThreadDescription lives in kernel32.dll, on Windows Server 2016,
+         * Windows 10 LTSB 2016 and Windows 10 version 1607, it was only available in
+         * kernelbase.dll. So, load it from there for maximum coverage.
+         */
+        if (!_pthread_set_thread_description) {
             _pthread_set_thread_description =
-                (HRESULT (WINAPI *)(HANDLE, PCWSTR))(void*) GetProcAddress(mod, "SetThreadDescription");
+                (HRESULT (WINAPI *)(HANDLE, PCWSTR))(void*) GetProcAddress(kernelbase, "SetThreadDescription");
+        }
+
+        _pthread_wait_on_address =
+            (pWaitOnAddress_t) GetProcAddress(kernelbase, "WaitOnAddress");
+
+        if (_pthread_wait_on_address) {
+            _pthread_wake_by_address_all =
+                (pWakeByAddressAll_t) GetProcAddress(kernelbase, "WakeByAddressAll");
+
+            assert (_pthread_wake_by_address_all);
         }
     }
+
+    void once_static_initialize (void);
+    once_static_initialize ();
 }
 #if defined(__GNUC__) && __GNUC__ >= 9 && !defined(__clang__)
 #pragma GCC diagnostic pop
