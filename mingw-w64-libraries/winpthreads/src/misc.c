@@ -84,8 +84,8 @@ static void winpthreads_init(void)
                 (HRESULT (WINAPI *)(HANDLE, PCWSTR))(void*) GetProcAddress(kernelbase, "SetThreadDescription");
         }
 
-        _pthread_wait_on_address =
-            (pWaitOnAddress_t) GetProcAddress(kernelbase, "WaitOnAddress");
+        //_pthread_wait_on_address =
+          //  (pWaitOnAddress_t) GetProcAddress(kernelbase, "WaitOnAddress");
 
         if (_pthread_wait_on_address) {
             _pthread_wake_by_address_all =
@@ -97,6 +97,9 @@ static void winpthreads_init(void)
 
     void once_static_initialize (void);
     once_static_initialize ();
+
+    void pthread_tls_init (void);
+    pthread_tls_init ();
 }
 #if defined(__GNUC__) && __GNUC__ >= 9 && !defined(__clang__)
 #pragma GCC diagnostic pop

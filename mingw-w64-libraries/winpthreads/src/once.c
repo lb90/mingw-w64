@@ -67,6 +67,12 @@ ReadNoFence (const volatile LONG *ptr)
   return __atomic_load_n (ptr, __ATOMIC_RELAXED);
 }
 
+static VOID
+WriteNoFence (volatile LONG *ptr, LONG value)
+{
+  __atomic_store_n (ptr, value, __ATOMIC_RELAXED);
+}
+
 #ifndef InterlockedCompareExchangeNoFence
 #define InterlockedCompareExchangeNoFence InterlockedCompareExchange
 #endif
@@ -151,9 +157,14 @@ external_data_new (void)
 static void
 external_data_free (external_data_t *data)
 {
+  assert (data->secondary_threads_count == 0);
+
   CloseHandle (data->completion_event);
+
   free (data);
 }
+
+#define TABLE_ALLOCATION_MINIMUM 8U
 
 typedef struct {
   pthread_once_t *once;
@@ -166,8 +177,6 @@ static struct {
   unsigned int entries_allocated;
   CRITICAL_SECTION lock;
 } table;
-
-#define TABLE_ALLOCATION_MINIMUM 8U
 
 static void
 table_initialize (void)
@@ -206,11 +215,9 @@ table_internal_expand_unlocked (void)
   size_t new_size_allocated = new_entries_allocated *
                               sizeof (table_entry_t);
   table_entry_t *new_entries = realloc (old_entries, new_size_allocated);
-
   if (!new_entries)
     return FALSE;
 
-  /* Zero-out the part with undefined contents */
   memset (new_entries + old_entries_allocated, 0,
           new_size_allocated - old_size_allocated);
 
@@ -308,100 +315,75 @@ table_append_unlocked (pthread_once_t *once,
 }
 
 static void
-table_remove_unlocked (pthread_once_t *once,
-                       unsigned int    index_hint)
+table_remove_unlocked (unsigned int index)
 {
-  unsigned int index;
+  table_entry_t *entry;
 
   assert (table.entries_count > 0);
 
-  if (index_hint < table.entries_count &&
-      table.entries[index_hint].once == once)
-  {
-    index = index_hint;
-  }
-  else
-  {
-    int ret = table_find_unlocked (once, &index);
-    assert (ret);
-  }
-
-  {
-    table_entry_t *entry = &table.entries[index];
-    external_data_free (entry->external_data);
-    memset (entry, 0, sizeof (*entry));
-  }
+  entry = &table.entries[index];
+  memset (entry, 0, sizeof (*entry));
 
   table.entries_count--;
 
   table_internal_maybe_shrink_unlocked ();
 }
 
-static int
-edo_secondary_thread_register (pthread_once_t   *once,
-                               external_data_t **out_external_data,
-                               unsigned int     *out_cookie)
+static external_data_t *
+owed_secondary_thread_register (pthread_once_t *once)
 {
+  external_data_t *data = NULL;
   unsigned int index;
 
   EnterCriticalSection (&table.lock);
 
   if (ReadNoFence (once) == 2)
-    goto not_registered;
+    goto leave;
 
   if (!table_find_unlocked (once, &index) &&
       !table_append_unlocked (once, &index))
-    goto not_registered;
+    goto leave;
 
   table_entry_t *entry = &table.entries[index];
 
-  assert (entry->external_data->secondary_threads_count < LONG_MAX);
-  entry->external_data->secondary_threads_count++;
+  if (entry->external_data->secondary_threads_count == LONG_MAX)
+    goto leave;
 
+  data = entry->external_data;
+  data->secondary_threads_count++;
+
+leave:
   LeaveCriticalSection (&table.lock);
 
-  *out_external_data = entry->external_data;
-  *out_cookie = index;
-
-  return TRUE;
-
-not_registered:
-  LeaveCriticalSection (&table.lock);
-
-  return FALSE;
+  return data;
 }
 
 static void
-edo_secondary_thread_unregister (pthread_once_t  *once,
-                                 external_data_t *external_data,
-                                 unsigned int     cookie)
+owed_secondary_thread_unregister (external_data_t *external_data)
 {
-  LONG new_count = InterlockedDecrementNoFence (&external_data->secondary_threads_count);
+  if (external_data) {
+    LONG new_count = InterlockedDecrementNoFence (&external_data->secondary_threads_count);
 
-  if (new_count == 0) {
-    EnterCriticalSection (&table.lock);
-
-    table_remove_unlocked (once, cookie);
-
-    LeaveCriticalSection (&table.lock);
+    if (new_count == 0)
+      external_data_free (external_data);
   }
 }
 
 static void
-edo_primary_thread_completed (pthread_once_t *once)
+owed_primary_thread_done (pthread_once_t *once)
 {
   unsigned int index;
   HANDLE completion_event = NULL;
 
   EnterCriticalSection (&table.lock);
 
-  assert (ReadNoFence (once) == 2);
-
   if (table_find_unlocked (once, &index)) {
     table_entry_t *entry = &table.entries[index];
 
     completion_event = entry->external_data->completion_event;
     assert (completion_event != NULL);
+
+    table_remove_unlocked (index);
   }
 
   LeaveCriticalSection (&table.lock);
@@ -417,6 +399,37 @@ edo_primary_thread_completed (pthread_once_t *once)
   }
 }
 
+static void
+owed_primary_thread_completed (pthread_once_t *once)
+{
+  WriteRelease (once, 2);
+
+  owed_primary_thread_done (once);
+}
+
+static void
+owed_primary_thread_cancelled (pthread_once_t *once)
+{
+  WriteNoFence (once, 0);
+
+  owed_primary_thread_done (once);
+}
+
+static void
+owed_cancel_cleanup (void *user_data)
+{
+  owed_primary_thread_cancelled ((pthread_once_t *) user_data);
+}
+
+static void
+modern_cancel_cleanup (void *user_data)
+{
+  pthread_once_t *once = (pthread_once_t *) user_data;
+
+  WriteNoFence (once, 0);
+  //pWakeByAddressSingle (once);
+}
+
 int
 pthread_once (pthread_once_t *once,
               void (* func) (void))
@@ -430,114 +443,110 @@ pthread_once (pthread_once_t *once,
   if (func == NULL)
     return EINVAL;
 
-  state = ReadAcquireWrapper (once);
-  if (state == 2) {
-    /* Already initialized. */
-    return 0;
-  }
-
-  if (pWaitOnAddress)
+  while (true)
   {
-    /* Implementation for modern Windows (Windows 8 and above) */
-
-    switch (state) {
-      case 0:
-        /* Try to become the initializer thread. */
-        if (InterlockedCompareExchangeNoFence (once, 1, 0) == 0) {
-          /* Perform initialization */
-          func ();
-
-          /* Publish the final "initialization done" value. */
-          WriteReleaseWrapper (once, 2);
-
-          /* Wake all waiters. */
-          pWakeByAddressAll (once);
-
-          return 0;
-        }
-
-        /* If we are here, another thread arrived first and
-         * was granted with the initialization task.
-         */
-
-        /* fallthrough */
-#ifdef __GNUC__
-       __attribute__ ((fallthrough));
-#endif
-      case 1:
-        while ((state = ReadNoFence (once)) == 1)
-          pWaitOnAddress (once, &state, sizeof (state), INFINITE);
-
-        /* Synchronize with the publishing from the primary thread. */
-        state = ReadAcquireWrapper (once);
-        assert (state == 2);
-
-        break;
-      default:
-        abort ();
-        break;
+    state = ReadAcquireWrapper (once);
+    if (state == 2) {
+      /* Already initialized. */
+      return 0;
     }
-  }
-  else
-  {
-    /* External-data once (EDO) for downlevel support (up to Windows 7) */
 
-    switch (state) {
-      case 0:
-        /* Attempt to become the primary thread. */
-        if (InterlockedCompareExchangeNoFence (once, 1, 0) == 0) {
-          /* Perform initialization. */
-          func ();
+    if (pWaitOnAddress)
+    {
+      /* Implementation for modern Windows (Windows 8 and above) */
 
-          /* Publish the final "initialization done" value. */
-          WriteReleaseWrapper (once, 2);
+      switch (state) {
+        case 0:
+          /* Try to become the initializer thread. */
+          if (InterlockedCompareExchangeNoFence (once, 1, 0) == 0) {
+            /* Perform initialization */
+            pthread_cleanup_push (modern_cancel_cleanup, once); /* TODO */
+            func ();
+            pthread_cleanup_pop (0);
 
-          /* Wake all waiters. */
-          edo_primary_thread_completed (once);
+            /* Publish the final "initialization done" value. */
+            WriteReleaseWrapper (once, 2);
 
-          return 0;
-        }
+            /* Wake all waiters. */
+            pWakeByAddressAll (once);
 
-        /* Another thread arrived first and was granted with the
-         * initialization task. Now go waiting.
-         */
+            return 0;
+          }
 
-        /* fallthrough */
-#ifdef __GNUC__
-       __attribute__ ((fallthrough));
-#endif
-      case 1:
-      {
-        external_data_t *data;
-        unsigned int cookie;
+          /* If we are here, another thread arrived first and
+           * was granted with the initialization task.
+           */
 
-        /* Attempt to register as secondary thread in the external
-         * data. This way we get an event that signals when once
-         * is completed.
-         */
-        if (edo_secondary_thread_register (once, &data, &cookie))
+          /* fallthrough */
+  #ifdef __GNUC__
+         __attribute__ ((fallthrough));
+  #endif
+        case 1:
+          while ((state = ReadNoFence (once)) == 1)
+            pWaitOnAddress (once, &state, sizeof (state), INFINITE);
+          break;
+        default:
+          abort ();
+          break;
+      }
+    }
+    else
+    {
+      /* External-data once (EDO) for downlevel support (up to Windows 7) */
+
+      switch (state) {
+        case 0:
+          /* Attempt to become the primary thread. */
+          if (InterlockedCompareExchangeNoFence (once, 1, 0) == 0) {
+            /* Perform initialization. */
+            pthread_cleanup_push (owed_cancel_cleanup, once);
+            func ();
+            pthread_cleanup_pop (0);
+
+            /* Publish the final "initialization done" value
+             * and wake all waiters.
+             */
+            owed_primary_thread_completed (once);
+
+            return 0;
+          }
+
+          /* Another thread arrived first and was granted with the
+           * initialization task. Now go waiting.
+           */
+
+          /* fallthrough */
+  #ifdef __GNUC__
+         __attribute__ ((fallthrough));
+  #endif
+        case 1:
         {
-          DWORD ret = WaitForSingleObject (data->completion_event, INFINITE);
-          assert (ret == WAIT_OBJECT_0);
+          external_data_t *data;
 
-          /* Unregister so that the last thread can clean up.
+          /* Attempt to register as secondary thread in the external
+           * data. This way we get an event that signals when once
+           * is completed.
            */
-          edo_secondary_thread_unregister (once, data, cookie);
-        }
-        else
-        {
-          /* Either initialization is already completed or resources
-           * couldn't be allocated. Fall back to checks at regular
-           * intervals. In case initialization is already completed,
-           * we won't sleep at all.
-           */
-          while (ReadNoFence (once) == 1)
-            Sleep (10);
+          data = owed_secondary_thread_register (once);
 
-          /* Synchronize with the publishing from the primary thread.
-           */
-          state = ReadAcquireWrapper (once);
-          assert (state == 2);
+          if (data) {
+            DWORD ret = WaitForSingleObject (data->completion_event, INFINITE);
+            assert (ret == WAIT_OBJECT_0);
+
+            /* Unregister so that the last thread can clean up.
+             */
+            owed_secondary_thread_unregister (data);
+          }
+          else
+          {
+            /* Either initialization is already completed or resources
+             * couldn't be allocated. Fall back to checks at regular
+             * intervals. In case initialization is already completed,
+             * we won't sleep at all.
+             */
+            while (ReadNoFence (once) == 1)
+              Sleep (10);
+          }
         }
       }
     }

@@ -58,9 +58,7 @@ void (**_pthread_key_dest)(void *) = NULL;
 static volatile long _pthread_cancelling;
 static int _pthread_concur;
 
-/* FIXME Will default to zero as needed */
-static pthread_once_t _pthread_tls_once;
-static DWORD _pthread_tls = 0xffffffff;
+static DWORD _pthread_tls = TLS_OUT_OF_INDEXES;
 
 static pthread_rwlock_t _pthread_key_lock = PTHREAD_RWLOCK_INITIALIZER;
 static unsigned long _pthread_key_max=0L;
@@ -899,8 +897,6 @@ __pthread_self_lite (void)
   _pthread_v *t;
   pthread_spinlock_t new_spin_keys = PTHREAD_SPINLOCK_INITIALIZER;
 
-  pthread_once (&_pthread_tls_once, pthread_tls_init);
-
   t = (_pthread_v *) TlsGetValue (_pthread_tls);
   if (t)
     return t;
@@ -1409,7 +1405,7 @@ pthread_create_wrapper (void *args)
 
   pthread_mutex_lock (&mtx_pthr_locked);
   pthread_mutex_lock (&tv->p_clock);
-  pthread_once (&_pthread_tls_once, pthread_tls_init);
+
   TlsSetValue(_pthread_tls, tv);
   tv->tid = GetCurrentThreadId();
   pthread_mutex_unlock (&tv->p_clock);
