@@ -95,6 +95,28 @@ unsigned long _pthread_wait_for_multiple_objects (unsigned long count, void **ha
 extern void (WINAPI *_pthread_get_system_time_best_as_file_time) (LPFILETIME);
 extern HRESULT (WINAPI *_pthread_set_thread_description) (HANDLE, PCWSTR);
 
+typedef struct {
+  void *key;
+  void *value;
+} winpthreads_table_entry_t;
+
+typedef struct {
+  winpthreads_table_entry_t *entries;
+  unsigned int entries_count;
+  unsigned int entries_allocated;
+} winpthreads_table_t;
+
+void                        winpthreads_table_initialize   (winpthreads_table_t *table);
+void                        winpthreads_table_finalize     (winpthreads_table_t *table);
+
+winpthreads_table_entry_t * winpthreads_table_find_entry   (winpthreads_table_t *table,
+                                                            void                *key);
+winpthreads_table_entry_t * winpthreads_table_add_entry    (winpthreads_table_t *table,
+                                                            void                *key);
+void                        winpthreads_table_remove_entry (winpthreads_table_t       *table,
+                                                            winpthreads_table_entry_t *entry);
+
+
 #if defined(__GNUC__) || defined(__clang__)
 #define likely(cond) __builtin_expect((cond) != 0, 1)
 #define unlikely(cond) __builtin_expect((cond) != 0, 0)
@@ -107,6 +129,10 @@ extern HRESULT (WINAPI *_pthread_set_thread_description) (HANDLE, PCWSTR);
 #define UNREACHABLE() __builtin_unreachable()
 #elif defined(_MSC_VER)
 #define UNREACHABLE() __assume(0)
+#endif
+
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 #endif
 
 #endif
