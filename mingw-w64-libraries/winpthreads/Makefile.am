@@ -22,6 +22,7 @@ libwinpthread_la_SOURCES =      \
   src/misc.c      src/misc.h    \
   src/mutex.c                   \
   src/nanosleep.c               \
+  src/once.c                    \
   src/rwlock.c    src/rwlock.h  \
   src/sem.c       src/sem.h     \
   src/spinlock.c                \
