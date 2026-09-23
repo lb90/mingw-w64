@@ -23,6 +23,8 @@
 #ifndef WIN_PTHREADS_MISC_H
 #define WIN_PTHREADS_MISC_H
 
+#include <windows.h>
+
 #include <limits.h>
 /* public header files */
 #include "pthread_compat.h"
@@ -94,6 +96,18 @@ unsigned long _pthread_wait_for_multiple_objects (unsigned long count, void **ha
 
 extern void (WINAPI *_pthread_get_system_time_best_as_file_time) (LPFILETIME);
 extern HRESULT (WINAPI *_pthread_set_thread_description) (HANDLE, PCWSTR);
+
+typedef BOOL (WINAPI *pWaitOnAddress_t) (volatile VOID *, PVOID, SIZE_T, DWORD);
+typedef VOID (WINAPI *pWakeByAddressSingle_t) (PVOID);
+typedef VOID (WINAPI *pWakeByAddressAll_t) (PVOID);
+
+extern pWaitOnAddress_t _pthread_wait_on_address;
+extern pWakeByAddressSingle_t _pthread_wake_by_address_single;
+extern pWakeByAddressAll_t _pthread_wake_by_address_all;
+
+#define pWaitOnAddress _pthread_wait_on_address
+#define pWakeByAddressSingle _pthread_wake_by_address_single
+#define pWakeByAddressAll _pthread_wake_by_address_all
 
 typedef struct {
   void *key;
