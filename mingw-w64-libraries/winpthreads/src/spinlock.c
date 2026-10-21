@@ -48,39 +48,32 @@
  */
 
 /**
- * Spinlock lock state.
+ * Lock state has 32 bits
+ *
+ *  MSB                                  LSB
+ * +----------------------------------------+
+ * | C | L |           UNUSED               |
+ * +----------------------------------------+
+ *
+ * Legend:
+ *
+ *  Bit 31 : There are waiting threads (mutex is contended)
+ *  Bit 30 : Mutex is locked
+ *  Bits 29-0: Unused
  */
-typedef enum {
-  /**
-   * Spinlock is unlocked.
-   */
-  Unlocked,
-  /**
-   * Spinlock is locked.
-   *
-   * This state inicates that there are no blocked threads waiting for
-   * the spinlock to be released.
-   *
-   * While in this state, if any thread blocks waiting for the spinlock to be
-   * released, the lock state will change to `LockedWithBlocking`.
-   */
-  Locked,
-  /**
-   * Spinlock is locked.
-   *
-   * This state indicates that there can be one or more blocked threads
-   * waiting for the spinlock to be released.
-   */
-  LockedWithBlocking,
-} WinpthreadsSpinlockLockState;
+
+#define BIT_CONTENDED 31U
+#define BIT_LOCKED 30U
+
+#define STATE_CONTENDED (1U << BIT_CONTENDED)
+#define STATE_LOCKED (1U << BIT_LOCKED)
+
+#define STATE_MASK (STATE_CONTENDED | STATE_LOCKED)
 
 /**
  * Internal structure pointed to by `pthread_spinlock_t` objects.
  */
 typedef struct {
-  /**
-   * One of `WinpthreadsSpinlockLockState` values.
-   */
   LONG State;
   /**
    * This value is used to indicate that spin lock has no owner.
@@ -93,7 +86,7 @@ typedef struct {
   /**
    * Auto-reset event.
    *
-   * When a thread releases the spinlock and `State` is `LockedWithBlocking`,
+   * When a thread releases the spinlock and `State` has `BIT_CONTENDED` set,
    * this event will be signaled in order to release one blocked thread.
    */
   HANDLE Event;
@@ -194,7 +187,7 @@ int pthread_spin_init (pthread_spinlock_t *lock, int pshared)
     return ENOMEM;
   }
 
-  wSpinlock->State    = Unlocked;
+  wSpinlock->State    = 0;
   wSpinlock->ThreadId = THREAD_ID_NO_OWNER;
   wSpinlock->Event    = CreateEventW (NULL, FALSE, FALSE, NULL);
 
@@ -255,7 +248,7 @@ int pthread_spin_destroy (pthread_spinlock_t *lock)
    * pthread_spin_init() refers to an already initialized spin lock object,
    * it is recommended that the function should fail and report an [EBUSY] error.
    */
-  if (unlikely (InterlockedCompareExchange (&wSpinlock->State, Locked, Unlocked) != Unlocked)) {
+  if (unlikely (InterlockedOr (&wSpinlock->State, STATE_LOCKED) & STATE_LOCKED)) {
     return EBUSY;
   }
 
@@ -295,17 +288,17 @@ int pthread_spin_lock (pthread_spinlock_t *lock)
   /**
    * Try fast path.
    */
-  if (InterlockedCompareExchange (&wSpinlock->State, Locked, Unlocked) == Unlocked) {
+  if (!(InterlockedOr (&wSpinlock->State, STATE_LOCKED) & STATE_LOCKED)) {
     goto locked;
   }
 
   /**
-   * Setting `wSpinlock->State` to `LockedWithBlocking` causes
+   * Setting `BIT_CONTENDED` in `wSpinlock->State` causes
    * `pthread_spin_unlock` to signal `wSpinlock->Event`.
    */
-  LONG oldLockState = InterlockedExchange (&wSpinlock->State, LockedWithBlocking);
+  LONG oldLockState = InterlockedOr (&wSpinlock->State, STATE_LOCKED | STATE_CONTENDED);
 
-  if (likely (oldLockState != Unlocked)) {
+  if (likely (oldLockState & STATE_LOCKED)) {
     do {
       switch (_pthread_wait_for_single_object (wSpinlock->Event, INFINITE)) {
         /**
@@ -319,7 +312,7 @@ int pthread_spin_lock (pthread_spinlock_t *lock)
         default:
           return EINVAL;
       }
-    } while (unlikely (InterlockedExchange (&wSpinlock->State, LockedWithBlocking) != Unlocked));
+    } while (unlikely (InterlockedOr (&wSpinlock->State, STATE_LOCKED | STATE_CONTENDED) & STATE_LOCKED));
   }
 
 locked:
@@ -344,7 +337,7 @@ int pthread_spin_trylock (pthread_spinlock_t *lock)
    * [EBUSY]
    *  A thread currently holds the lock.
    */
-  if (InterlockedCompareExchange (&wSpinlock->State, Locked, Unlocked) != Unlocked) {
+  if (InterlockedOr (&wSpinlock->State, STATE_LOCKED) & STATE_LOCKED) {
     return EBUSY;
   }
 
@@ -380,10 +373,10 @@ int pthread_spin_unlock (pthread_spinlock_t *lock)
   wSpinlock->ThreadId = THREAD_ID_NO_OWNER;
 
   /**
-   * If `wSpinlock->State` is `LockedWithBlocking`, then some other thread is
-   * waiting for `wSpinlock->Event` to become signaled.
+   * If `wSpinlock->State` has `BIT_CONTENDED` set, then some other thread
+   * is waiting for `wSpinlock->Event` to become signaled.
    */
-  if (InterlockedExchange (&wSpinlock->State, Unlocked) == LockedWithBlocking) {
+  if (InterlockedAnd (&wSpinlock->State, ~STATE_MASK) & STATE_CONTENDED) {
     if (!SetEvent (wSpinlock->Event)) {
       return EINVAL;
     }
