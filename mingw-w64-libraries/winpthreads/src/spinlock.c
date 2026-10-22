@@ -31,6 +31,7 @@
 
 /* public header files */
 #include "pthread.h"
+
 /* internal header files */
 #include "misc.h"
 
@@ -45,6 +46,12 @@
  *
  * pthread_spin_unlock():
  *  <https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/functions/pthread_spin_unlock.html>
+ *
+ * Additional reads:
+ *
+ *  [1] LKML - "POSIX mutex destruction requirements vs. futexes"
+ *      -> https://lkml.org/lkml/2014/11/27/472
+ *
  */
 
 /**
@@ -52,14 +59,19 @@
  *
  *  MSB                                  LSB
  * +----------------------------------------+
- * | C | L |           UNUSED               |
+ * | C | L |       LATE USE COUNT           |
  * +----------------------------------------+
  *
  * Legend:
  *
  *  Bit 31 : There are waiting threads (mutex is contended)
  *  Bit 30 : Mutex is locked
- *  Bits 29-0: Unused
+ *  Bits 29-0: Use count for the critical part of unlock
+ *             (after state is set to unlocked but mutex
+ *              still used, see [1]). This count is negative,
+ *             i.e. it's 0 when all pthread_spin_unock have
+ *             finished their work; -1 while there's an
+ *             outstanding pthread_spin_unlock, and so on.
  */
 
 #define BIT_CONTENDED 31U
@@ -69,6 +81,7 @@
 #define STATE_LOCKED (1U << BIT_LOCKED)
 
 #define STATE_MASK (STATE_CONTENDED | STATE_LOCKED)
+#define LATE_USE_COUNT_MASK (STATE_LOCKED - 1)
 
 /**
  * Internal structure pointed to by `pthread_spinlock_t` objects.
@@ -257,6 +270,14 @@ int pthread_spin_destroy (pthread_spinlock_t *lock)
    */
   InterlockedExchangePointer ((void **) pSpinlock, NULL);
 
+  /**
+   * pthread_spin_destroy() can run concurrently with pthread_spin_unlock() [1].
+   * Wait for all in-flight pthread_spin_unlock() invocations to finish working
+   * on the mutex.
+   */
+  while ((ReadNoFence_ (&wSpinlock->State) & LATE_USE_COUNT_MASK) != 0)
+    _pthread_wait_for_single_object (wSpinlock->Event, INFINITE);
+
   CloseHandle (wSpinlock->Event);
   free (wSpinlock);
 
@@ -372,15 +393,37 @@ int pthread_spin_unlock (pthread_spinlock_t *lock)
 
   wSpinlock->ThreadId = THREAD_ID_NO_OWNER;
 
+  LONG State = ReadNoFence_ (&wSpinlock->State);
+  if (!(State & STATE_CONTENDED)) {
+    /**
+     * Reset `BIT_LOCKED` and increment the late use count. This all can be
+     * done with a single Interlocked addition. This might leave a spurious
+     * `BIT_CONTENDED` (if set by another thread right before this call),
+     * but that's not a problem.
+     */
+    State = InterlockedExchangeAdd (&wSpinlock->State, (STATE_CONTENDED + STATE_LOCKED + 1));
+  }
+  else {
+    /**
+     * Reset both `BIT_CONTENDED`, `BIT_LOCKED` and increment the late use
+     * count. This all can be done with a single Interlocked addition.
+     */
+    State = InterlockedExchangeAdd (&wSpinlock->State, (STATE_LOCKED + 1));
+  }
+
+  int ret = 0;
+
   /**
-   * If `wSpinlock->State` has `BIT_CONTENDED` set, then some other thread
+   * If `wSpinlock->State` had `BIT_CONTENDED` set, then some other thread
    * is waiting for `wSpinlock->Event` to become signaled.
    */
-  if (InterlockedAnd (&wSpinlock->State, ~STATE_MASK) & STATE_CONTENDED) {
+  if (State & STATE_CONTENDED) {
     if (!SetEvent (wSpinlock->Event)) {
-      return EINVAL;
+      ret = EINVAL;
     }
   }
 
-  return 0;
+  InterlockedDecrement (&wSpinlock->State);
+
+  return ret;
 }

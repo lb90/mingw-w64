@@ -83,6 +83,12 @@ unsigned long _pthread_wait_for_multiple_objects (unsigned long count, void **ha
 
 extern HRESULT (WINAPI *_pthread_set_thread_description) (HANDLE, PCWSTR);
 
+#ifdef __GNUC__
+#define ReadNoFence_(ptr) __atomic_load_n ((LONG*)ptr, __ATOMIC_RELAXED)
+#else
+#define ReadNoFence_ ReadNoFence
+#endif
+
 #if defined(__GNUC__) || defined(__clang__)
 #define likely(cond) __builtin_expect((cond) != 0, 1)
 #define unlikely(cond) __builtin_expect((cond) != 0, 0)
