@@ -396,6 +396,14 @@ int pthread_spin_unlock (pthread_spinlock_t *lock)
   LONG State = ReadNoFence_ (&wSpinlock->State);
   if (!(State & STATE_CONTENDED)) {
     /**
+     * It seems that the lock has no waiters. Attempt first a release with
+     * InterlockedCompareExchange. If that succeeds (likely), everything
+     * is done with a single interlocked operation.
+     */
+    if (InterlockedCompareExchange (&wSpinlock->State, State & LATE_USE_COUNT_MASK, State) == State)
+      return 0;
+
+    /**
      * Reset `BIT_LOCKED` and increment the late use count. This all can be
      * done with a single Interlocked addition. This might leave a spurious
      * `BIT_CONTENDED` (if set by another thread right before this call),
